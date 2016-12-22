@@ -257,7 +257,7 @@ struct {
 			.domain = 1,
 			.bdf = 0x00,
 			.bar_mask = {
-				0xffffff00, 0xffffffff, 0x00000000,
+				0xfffff000, 0x00000000, 0x00000000,
 				0x00000000, 0x00000000, 0x00000000,
 			},
 			.shmem_region = 21,
