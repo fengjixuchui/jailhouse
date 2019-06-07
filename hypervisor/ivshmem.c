@@ -29,8 +29,8 @@
 #include <jailhouse/processor.h>
 #include <jailhouse/percpu.h>
 
-#define VIRTIO_VENDOR_ID	0x1af4
-#define IVSHMEM_DEVICE_ID	0x1110
+#define JAILHOUSE_VENDOR_ID		0x4a48
+#define JAILHOUSE_DEVICE_ID		0x4a48
 
 /* in jailhouse we can not allow dynamic remapping of the actual shared memory
  * the location and the size are stored here. A memory-BAR size of 0 will tell
@@ -62,10 +62,10 @@ struct ivshmem_data {
 static struct ivshmem_data *ivshmem_list;
 
 static const u32 default_cspace[IVSHMEM_CFG_SIZE / sizeof(u32)] = {
-	[0x00/4] = (IVSHMEM_DEVICE_ID << 16) | VIRTIO_VENDOR_ID,
+	[0x00/4] = (JAILHOUSE_DEVICE_ID << 16) | JAILHOUSE_VENDOR_ID,
 	[0x04/4] = (PCI_STS_CAPS << 16),
 	[0x08/4] = PCI_DEV_CLASS_OTHER << 24,
-	[0x2c/4] = (IVSHMEM_DEVICE_ID << 16) | VIRTIO_VENDOR_ID,
+	[0x2c/4] = (JAILHOUSE_DEVICE_ID << 16) | JAILHOUSE_VENDOR_ID,
 	[0x34/4] = IVSHMEM_CFG_MSIX_CAP,
 	/* MSI-X capability */
 	[IVSHMEM_CFG_MSIX_CAP/4] = (IVSHMEM_MSIX_VECTORS - 1) << 16
