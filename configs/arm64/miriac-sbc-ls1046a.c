@@ -462,6 +462,7 @@ struct {
 				0x00000000, 0x00000000, 0x00000000,
 			},
 			.shmem_region = ARRAY_SIZE(config.mem_regions) - 1,
+			.shmem_dev_id = 0,
 			.shmem_protocol = JAILHOUSE_SHMEM_PROTO_VETH,
 		},
 	},

@@ -132,6 +132,7 @@ struct {
 				0x00000000, 0x00000000, 0x00000000,
 			},
 			.shmem_region = 3,
+			.shmem_dev_id = 0,
 			.shmem_protocol = JAILHOUSE_SHMEM_PROTO_VETH,
 		},
 		/* 0001:00:00.0 */ {
@@ -143,6 +144,7 @@ struct {
 				0x00000000, 0x00000000, 0x00000000,
 			},
 			.shmem_region = 4,
+			.shmem_dev_id = 0,
 			.shmem_protocol = JAILHOUSE_SHMEM_PROTO_VETH,
 		},
 	},

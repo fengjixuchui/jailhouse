@@ -92,6 +92,7 @@ struct {
 			},
 			.num_msix_vectors = 1,
 			.shmem_region = 2,
+			.shmem_dev_id = 1,
 		},
 	},
 };
