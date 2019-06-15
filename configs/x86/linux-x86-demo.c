@@ -150,8 +150,8 @@ struct {
 			.domain = 0x0,
 			.bdf = 0x0e << 3,
 			.bar_mask = {
-				0xfffff000, 0x00000000, 0x00000000,
-				0x00000000, 0xffffffe0, 0xffffffff,
+				0xfffff000, 0xffffffe0, 0x00000000,
+				0x00000000, 0x00000000, 0x00000000,
 			},
 			.num_msix_vectors = 1,
 			.shmem_region = 3,
