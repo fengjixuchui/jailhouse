@@ -52,10 +52,13 @@
 
 #define IVSHMEM_REG_ID			0x00
 #define IVSHMEM_REG_MAX_PEERS		0x04
+#define IVSHMEM_REG_FEATURES		0x08
 #define IVSHMEM_REG_INTX_CTRL		0x0c
 #define IVSHMEM_REG_DOORBELL		0x10
 #define IVSHMEM_REG_LSTATE		0x14
 #define IVSHMEM_REG_RSTATE		0x18
+
+#define IVSHMEM_FEAT_SYNC_SHMEM_BASE	(1 << 0)
 
 struct ivshmem_data {
 	struct ivshmem_endpoint eps[IVSHMEM_MAX_PEERS];
@@ -104,6 +107,10 @@ static enum mmio_result ivshmem_register_mmio(void *arg,
 	case IVSHMEM_REG_MAX_PEERS:
 		/* read-only number of peers */
 		mmio->value = IVSHMEM_MAX_PEERS;
+		break;
+	case IVSHMEM_REG_FEATURES:
+		/* read-only features: shared memory base is always in sync */
+		mmio->value = IVSHMEM_FEAT_SYNC_SHMEM_BASE;
 		break;
 	case IVSHMEM_REG_INTX_CTRL:
 		if (mmio->is_write) {
