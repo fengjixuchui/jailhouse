@@ -173,8 +173,8 @@ struct jailhouse_pci_device {
 	__u16 num_msix_vectors;
 	__u16 msix_region_size;
 	__u64 msix_address;
-	/** Memory region index of shared memory device. */
-	__u32 shmem_region;
+	/** First memory region index of shared memory device. */
+	__u32 shmem_regions_start;
 	/** ID of shared memory device (0..1). */
 	__u8 shmem_dev_id;
 	__u8 padding;

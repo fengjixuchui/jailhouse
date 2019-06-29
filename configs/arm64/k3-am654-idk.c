@@ -18,7 +18,7 @@
 struct {
 	struct jailhouse_system header;
 	__u64 cpus[1];
-	struct jailhouse_memory mem_regions[15];
+	struct jailhouse_memory mem_regions[16];
 	struct jailhouse_irqchip irqchips[5];
 	struct jailhouse_pci_device pci_devices[1];
 } __attribute__((packed)) config = {
@@ -79,10 +79,16 @@ struct {
 			.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_WRITE |
 				JAILHOUSE_MEM_EXECUTE,
 		},
-		/* IVSHMEM shared memory region for 00:00.0 */ {
+		/* IVSHMEM shared memory regions for 00:00.0 */ {
 			.phys_start = 0x8dfb00000,
 			.virt_start = 0x8dfb00000,
-			.size = 0x100000,
+			.size = 0x1000,
+			.flags = JAILHOUSE_MEM_READ,
+		},
+		{
+			.phys_start = 0x8dfb01000,
+			.virt_start = 0x8dfb01000,
+			.size = 0xff000,
 			.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_WRITE,
 		},
 		/* RAM. Reserved for inmates */ {
@@ -218,7 +224,7 @@ struct {
 				0xfffff000, 0x00000000, 0x00000000,
 				0x00000000, 0x00000000, 0x00000000,
 			},
-			.shmem_region = 2,
+			.shmem_regions_start = 2,
 			.shmem_dev_id = 0,
 			.shmem_protocol = JAILHOUSE_SHMEM_PROTO_VETH,
 		},
