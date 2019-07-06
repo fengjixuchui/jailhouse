@@ -93,12 +93,13 @@ struct {
 			.domain = 0x0000,
 			.bdf = 0x0f << 3,
 			.bar_mask = {
-				0xfffff000, 0xffffffe0, 0x00000000,
+				0xfffff000, 0xfffffe00, 0x00000000,
 				0x00000000, 0x00000000, 0x00000000,
 			},
-			.num_msix_vectors = 1,
+			.num_msix_vectors = 16,
 			.shmem_regions_start = 2,
 			.shmem_dev_id = 1,
+			.shmem_protocol = JAILHOUSE_SHMEM_PROTO_UNDEFINED,
 		},
 	},
 };
