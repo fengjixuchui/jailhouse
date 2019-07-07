@@ -19,9 +19,9 @@ struct {
 	struct jailhouse_cell_desc cell;
 	__u64 cpus[1];
 #ifdef CONFIG_QEMU_E1000E_ASSIGNMENT
-	struct jailhouse_memory mem_regions[9];
+	struct jailhouse_memory mem_regions[11];
 #else
-	struct jailhouse_memory mem_regions[5];
+	struct jailhouse_memory mem_regions[7];
 #endif
 	struct jailhouse_cache cache_regions[1];
 	struct jailhouse_irqchip irqchips[1];
@@ -83,11 +83,19 @@ struct {
 			.size = 0x1000,
 			.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_ROOTSHARED,
 		},
+		{ 0 },
 		{
 			.phys_start = 0x3f101000,
 			.virt_start = 0x3f101000,
-			.size = 0xf8000,
-			.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_WRITE,
+			.size = 0x7c000,
+			.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_ROOTSHARED,
+		},
+		{
+			.phys_start = 0x3f17d000,
+			.virt_start = 0x3f17d000,
+			.size = 0x7c000,
+			.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_WRITE |
+				JAILHOUSE_MEM_ROOTSHARED,
 		},
 #ifdef CONFIG_QEMU_E1000E_ASSIGNMENT
 		/* MemRegion: feb40000-feb7ffff : 0000:00:02.0 */
