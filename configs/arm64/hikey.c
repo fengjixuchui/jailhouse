@@ -137,6 +137,7 @@ struct {
 			},
 			.shmem_regions_start = 4,
 			.shmem_dev_id = 0,
+			.shmem_peers = 2,
 			.shmem_protocol = JAILHOUSE_SHMEM_PROTO_VETH,
 		},
 	},

@@ -159,6 +159,7 @@ struct {
 			},
 			.shmem_regions_start = 3,
 			.shmem_dev_id = 0,
+			.shmem_peers = 2,
 			.shmem_protocol = JAILHOUSE_SHMEM_PROTO_VETH,
 		},
 		/* 0001:00:00.0 */ {
@@ -171,6 +172,7 @@ struct {
 			},
 			.shmem_regions_start = 7,
 			.shmem_dev_id = 0,
+			.shmem_peers = 2,
 			.shmem_protocol = JAILHOUSE_SHMEM_PROTO_VETH,
 		},
 	},
