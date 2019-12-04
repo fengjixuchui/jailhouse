@@ -45,9 +45,9 @@
 struct {
 	struct jailhouse_system header;
 	__u64 cpus[${int((cpucount + 63) / 64)}];
-	struct jailhouse_memory mem_regions[${len(regions)}];
+	struct jailhouse_memory mem_regions[${len(mem_regions)}];
 	struct jailhouse_irqchip irqchips[${len(irqchips)}];
-	__u8 pio_bitmap[0x2000];
+	struct jailhouse_pio pio_regions[${len([1 for r in port_regions if r.permit])}];
 	struct jailhouse_pci_device pci_devices[${len(pcidevices)}];
 	struct jailhouse_pci_capability pci_caps[${len(pcicaps)}];
 } __attribute__((packed)) config = {
@@ -90,6 +90,7 @@ struct {
 				.iommu_units = {
 					% for unit in iommu_units:
 					{
+						.type = ${unit.type},
 						.base = ${hex(unit.base_addr)},
 						.size = ${hex(unit.mmio_size)},
 						% if unit.is_amd_iommu:
@@ -109,7 +110,7 @@ struct {
 			.cpu_set_size = sizeof(config.cpus),
 			.num_memory_regions = ARRAY_SIZE(config.mem_regions),
 			.num_irqchips = ARRAY_SIZE(config.irqchips),
-			.pio_bitmap_size = ARRAY_SIZE(config.pio_bitmap),
+			.num_pio_regions = ARRAY_SIZE(config.pio_regions),
 			.num_pci_devices = ARRAY_SIZE(config.pci_devices),
 			.num_pci_caps = ARRAY_SIZE(config.pci_caps),
 		},
@@ -125,15 +126,15 @@ struct {
 	},
 
 	.mem_regions = {
-		% for r in regions:
+		% for r in mem_regions:
 		/* ${str(r)} */
 		% for c in r.comments:
 		/* ${c} */
 		% endfor
 		{
-			.phys_start = ${hex(r.start).strip('L')},
-			.virt_start = ${hex(r.start).strip('L')},
-			.size = ${hex(r.size()).strip('L')},
+			.phys_start = ${r.start_str()},
+			.virt_start = ${r.start_str()},
+			.size = ${r.size_str()},
 			.flags = ${r.flagstr('\t\t')},
 		},
 		% endfor
@@ -152,17 +153,11 @@ struct {
 		% endfor
 	},
 
-	.pio_bitmap = {
-		[     0/8 ...   0x3f/8] = -1,
-		[  0x40/8 ...   0x47/8] = 0xf0, /* PIT */
-		[  0x48/8 ...   0x5f/8] = -1,
-		[  0x60/8 ...   0x67/8] = 0xec, /* HACK: NMI status/control */
-		[  0x68/8 ...   0x6f/8] = -1,
-		[  0x70/8 ...   0x77/8] = 0xfc, /* RTC */
-		[  0x78/8 ...  0x3af/8] = -1,
-		[ 0x3b0/8 ...  0x3df/8] = 0x00, /* VGA */
-		[ 0x3e0/8 ...  0xcff/8] = -1,
-		[ 0xd00/8 ... 0xffff/8] = 0, /* HACK: PCI bus */
+	.pio_regions = {
+		% for r in port_regions:
+		/* ${str(r)} */
+		${'' if r.permit else '/* '}PIO_RANGE(${r.start_str()}, ${r.size_str()}),${'' if r.permit else ' */'}
+		% endfor
 	},
 
 	.pci_devices = {
@@ -199,7 +194,7 @@ struct {
 		{
 			.id = ${c.gen_id_str()},
 			.start = ${hex(c.start)},
-			.len = ${c.len},
+			.len = ${hex(c.len)},
 			.flags = ${c.flags},
 		},
 		% endfor

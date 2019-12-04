@@ -22,6 +22,7 @@ KBUILD_CFLAGS := -g -O3 -DLIBEXECDIR=\"$(libexecdir)\" \
 	-Wall -Wextra -Wmissing-declarations -Wmissing-prototypes -Werror \
 	-D__LINUX_COMPILER_TYPES_H \
 	-DJAILHOUSE_VERSION=\"$(shell cat $(src)/../VERSION)\" $(EXTRA_CFLAGS)
+KBUILD_CPPFLAGS :=
 # prior to 4.19
 LDFLAGS :=
 # since 4.19
@@ -34,8 +35,25 @@ KBUILD_CFLAGS += $(call cc-option, -no-pie)
 BINARIES := jailhouse
 always := $(BINARIES)
 
+HAS_PYTHON_MAKO := \
+	$(shell $(PYTHON) -c "from mako.template import Template" 2>/dev/null \
+	&& echo yes)
+
+ifeq ($(strip $(HAS_PYTHON_MAKO)), yes)
+always += jailhouse-config-collect
+HELPERS := jailhouse-config-collect
+
+else  # !HAS_PYTHON_MAKO
+
+HELPERS :=
+$(info WARNING: Could not create the helper script to generate \
+	   configurations on remote machines \
+	   ("jailhouse-conf-collect"). You need Python and the \
+	   Mako library for it.)
+endif # !HAS_PYTHON_MAKO
+
 ifeq ($(strip $(PYTHON_PIP_USABLE)), yes)
-HELPERS := \
+HELPERS += \
 	jailhouse-cell-linux \
 	jailhouse-cell-stats \
 	jailhouse-config-create \
@@ -60,22 +78,6 @@ install::
 	$(info WARNING: Could not install Python-based helpers. You need \
 		   Python and pip in order to install them.)
 endif # !PYTHON_PIP_USABLE
-
-HAS_PYTHON_MAKO := \
-	$(shell $(PYTHON) -c "from mako.template import Template" 2>/dev/null \
-	&& echo yes)
-
-ifeq ($(strip $(HAS_PYTHON_MAKO)), yes)
-always += jailhouse-config-collect
-HELPERS += jailhouse-config-collect
-
-else  # !HAS_PYTHON_MAKO
-
-$(info WARNING: Could not create the helper script to generate \
-	   configurations on remote machines \
-	   ("jailhouse-conf-collect"). You need Python and the \
-	   Mako library for it.)
-endif # !HAS_PYTHON_MAKO
 
 MAN8_PAGES := jailhouse.8 jailhouse-cell.8 jailhouse-enable.8
 

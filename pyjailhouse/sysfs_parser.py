@@ -18,6 +18,7 @@
 # to change the generated C-code.
 
 
+import re
 import struct
 import os
 import fnmatch
@@ -25,6 +26,7 @@ import fnmatch
 from .pci_defs import PCI_CAP_ID, PCI_EXT_CAP_ID
 
 root_dir = "/"
+bdf_regex = re.compile(r'\w{4}:\w{2}:\w{2}\.\w')
 
 
 def set_root_dir(dir):
@@ -96,9 +98,80 @@ def input_listdir(dir, wildcards):
     return dirs
 
 
+def regions_split_by_kernel(tree):
+    kernel = [x for x in tree.children
+              if x.region.typestr.startswith('Kernel')]
+    if not kernel:
+        return [tree.region]
+
+    r = tree.region
+    s = r.typestr
+
+    kernel_start = kernel[0].region.start
+    kernel_stop = kernel[len(kernel) - 1].region.stop
+
+    # align this for 16M, but only if we have enough space
+    kernel_stop = (kernel_stop & ~0xFFFFFF) + 0xFFFFFF
+    if kernel_stop > r.stop:
+        kernel_stop = r.stop
+
+    before_kernel = None
+    after_kernel = None
+
+    # before Kernel if any
+    if r.start < kernel_start:
+        before_kernel = MemRegion(r.start, kernel_start - 1, s)
+
+    kernel_region = MemRegion(kernel_start, kernel_stop, "Kernel")
+
+    # after Kernel if any
+    if r.stop > kernel_stop:
+        after_kernel = MemRegion(kernel_stop + 1, r.stop, s)
+
+    return [before_kernel, kernel_region, after_kernel]
+
+
+def parse_iomem_tree(tree):
+    regions = []
+    dmar_regions = []
+
+    for tree in tree.children:
+        r = tree.region
+        s = r.typestr
+
+        # System RAM on the first level will be added completely,
+        # if they don't contain the kernel itself, if they do,
+        # we split them
+        if tree.level == 1 and s == 'System RAM':
+            regions.extend(regions_split_by_kernel(tree))
+            continue
+
+        # blacklisted on all levels, covers both APIC and IOAPIC
+        if s.find('PCI MMCONFIG') >= 0 or s.find('APIC') >= 0:
+            continue
+
+        # generally blacklisted, with a few exceptions
+        if s.lower() == 'reserved':
+            regions.extend(tree.find_regions_by_name('HPET'))
+            dmar_regions.extend(tree.find_regions_by_name('dmar'))
+            continue
+
+        # if the tree continues recurse further down ...
+        if tree.children:
+            (temp_regions, temp_dmar_regions) = parse_iomem_tree(tree)
+            regions.extend(temp_regions)
+            dmar_regions.extend(temp_dmar_regions)
+            continue
+
+        # add all remaining leaves
+        regions.append(r)
+
+    return regions, dmar_regions
+
+
 def parse_iomem(pcidevices):
-    (regions, dmar_regions) = IOMemRegionTree.parse_iomem_tree(
-        IOMemRegionTree.parse_iomem_file())
+    tree = IORegionTree.parse_io_file('/proc/iomem', MemRegion)
+    (regions, dmar_regions) = parse_iomem_tree(tree)
 
     rom_region = MemRegion(0xc0000, 0xdffff, 'ROMs')
     add_rom_region = False
@@ -113,7 +186,7 @@ def parse_iomem(pcidevices):
         append_r = True
         # filter the list for MSI-X pages
         for d in pcidevices:
-            if d.msix_address >= r.start and d.msix_address <= r.stop:
+            if r.start <= d.msix_address <= r.stop:
                 if d.msix_address > r.start:
                     head_r = MemRegion(r.start, d.msix_address - 1,
                                        r.typestr, r.comments)
@@ -125,7 +198,7 @@ def parse_iomem(pcidevices):
                 append_r = False
                 break
         # filter out the ROMs
-        if (r.start >= rom_region.start and r.stop <= rom_region.stop):
+        if r.start >= rom_region.start and r.stop <= rom_region.stop:
             add_rom_region = True
             append_r = False
         # filter out and save DMAR regions
@@ -141,10 +214,69 @@ def parse_iomem(pcidevices):
 
     # newer Linux kernels will report the first page as reserved
     # it is needed for CPU init so include it anyways
-    if (ret[0].typestr == 'System RAM' and ret[0].start == 0x1000):
+    if ret[0].typestr == 'System RAM' and ret[0].start == 0x1000:
         ret[0].start = 0
 
     return ret, dmar_regions
+
+
+def ioports_search_pci_devices(tree):
+    ret = []
+
+    if tree.region and bdf_regex.match(tree.region.typestr):
+        ret.append(tree.region)
+    else:
+        for subtree in tree:
+            ret += ioports_search_pci_devices(subtree)
+
+    return ret
+
+
+def parse_ioports():
+    tree = IORegionTree.parse_io_file('/proc/ioports', PortRegion)
+
+    pm_timer_base = tree.find_regions_by_name('ACPI PM_TMR')
+    if len(pm_timer_base) != 1:
+        raise RuntimeError('Found %u entries for ACPI PM_TMR (expected 1)' %
+                           len(pm_timer_base))
+    pm_timer_base = pm_timer_base[0].start
+
+    leaves = tree.get_leaves()
+
+    # Never expose PCI config space ports to the user
+    leaves = list(filter(lambda p: p.start != 0xcf8, leaves))
+
+    # Drop everything above 0xd00
+    leaves = list(filter(lambda p: p.start < 0xd00, leaves))
+
+    whitelist = [
+        0x40,   # PIT
+        0x60,   # keyboard
+        0x61,   # HACK: NMI status/control
+        0x64,   # I8042
+        0x70,   # RTC
+        0x2f8,  # serial
+        0x3f8,  # serial
+    ]
+
+    pci_devices = ioports_search_pci_devices(tree)
+
+    # Drop devices below 0xd00 as leaves already contains them. Access should
+    # not be permitted by default.
+    pci_devices = list(filter(lambda p: p.start >= 0xd00, pci_devices))
+    for pci_device in pci_devices:
+        pci_device.permit = True
+
+    for r in leaves:
+        typestr = r.typestr.lower()
+        if r.start in whitelist or \
+           True in [vga in typestr for vga in ['vesa', 'vga']]:
+            r.permit = True
+
+    leaves += pci_devices
+    leaves.sort(key=lambda r: r.start)
+
+    return leaves, pm_timer_base
 
 
 def parse_pcidevices():
@@ -156,7 +288,7 @@ def parse_pcidevices():
     for dir in list:
         d = PCIDevice.parse_pcidevice_sysfsdir(basedir, dir)
         if d is not None:
-            if len(d.caps) > 0:
+            if d.caps:
                 duplicate = False
                 # look for duplicate capability patterns
                 for d2 in devices:
@@ -248,6 +380,7 @@ def parse_dmar(pcidevices, ioapics, dmar_regions):
             if size > 0x3000:
                 raise RuntimeError('Unexpectedly large DMAR region.')
             units.append(IOMMUConfig({
+                'type': 'JAILHOUSE_IOMMU_INTEL',
                 'base_addr': base,
                 'mmio_size': size
             }))
@@ -275,8 +408,8 @@ def parse_dmar(pcidevices, ioapics, dmar_regions):
                                 PCIPCIBridge.get_2nd_busses(d)
                             for d2 in pcidevices:
                                 if (
-                                    d2.bus >= secondbus and
-                                    d2.bus <= subordinate
+                                        d2.bus >= secondbus and
+                                        d2.bus <= subordinate
                                 ):
                                     d2.iommu = len(units) - 1
                             break
@@ -392,6 +525,7 @@ def parse_ivrs(pcidevices, ioapics):
                 mmio_size = 16384
 
             units.append(IOMMUConfig({
+                'type': 'JAILHOUSE_IOMMU_AMD',
                 'base_addr': base_addr,
                 'mmio_size': mmio_size,
                 'amd_bdf': iommu_bdf,
@@ -488,7 +622,7 @@ def parse_ivrs(pcidevices, ioapics):
 
             regions.append(
                 MemRegion(mem_addr, mem_addr + mem_len - 1, 'ACPI IVRS',
-                    comment))
+                          comment))
 
         elif type == 0x40:
             raise RuntimeError(
@@ -518,6 +652,7 @@ def get_cpu_vendor():
             key, value = line.split(':')
             if key.strip() == 'vendor_id':
                 return value.strip()
+    raise RuntimeError('Broken %s/proc/cpuinfo' % root_dir)
 
 
 class PCIBARs:
@@ -655,14 +790,42 @@ class PCICapability:
 
                 id = PCI_EXT_CAP_ID(id)
                 next = version_next >> 4
-                if id == PCI_EXT_CAP_ID.SRIOV:
+                # access side effects still need to be analyzed
+                flags = PCICapability.RD
+
+                if id == PCI_EXT_CAP_ID.VNDR:
+                    (vsec_len,) = struct.unpack('<I', f.read(4))
+                    len = 4 + (vsec_len >> 20)
+                elif id == PCI_EXT_CAP_ID.ACS:
+                    len = 8
+
+                    (acs_cap, acs_ctrl) = struct.unpack('<HH', f.read(4))
+                    if acs_cap & (1 << 5) and acs_ctrl & (1 << 5):
+                        vector_bits = acs_cap >> 8
+                        if vector_bits == 0:
+                            vector_bits = 256
+
+                        vector_bytes = int((vector_bits + 31) / (8 * 4))
+                        len += vector_bytes
+                elif id in [PCI_EXT_CAP_ID.VC, PCI_EXT_CAP_ID.VC9]:
+                    # parsing is too complex, but we have at least 4 DWORDS
+                    len = 4 * 4
+                elif id == PCI_EXT_CAP_ID.MFVC:
+                    len = 4
+                elif id in [PCI_EXT_CAP_ID.LTR, PCI_EXT_CAP_ID.ARI,
+                            PCI_EXT_CAP_ID.PASID]:
+                    len = 8
+                elif id in [PCI_EXT_CAP_ID.DSN, PCI_EXT_CAP_ID.PTM]:
+                    len = 12
+                elif id in [PCI_EXT_CAP_ID.PWR, PCI_EXT_CAP_ID.SECPCI]:
+                    len = 16
+                elif id == PCI_EXT_CAP_ID.MCAST:
+                    len = 48
+                elif id in [PCI_EXT_CAP_ID.SRIOV, PCI_EXT_CAP_ID.ERR]:
                     len = 64
-                    # access side effects still need to be analyzed
-                    flags = PCICapability.RD
                 else:
                     # unknown/unhandled cap, mark its existence
                     len = 4
-                    flags = PCICapability.RD
                 f.seek(cap + 4)
                 content = f.read(len - 4)
                 caps.append(PCICapability(id, True, cap, len, flags, content,
@@ -750,33 +913,68 @@ class PCIPCIBridge(PCIDevice):
         return (secondbus, subordinate)
 
 
-class MemRegion:
-    def __init__(self, start, stop, typestr, comments=None):
+class IORegion(object):
+    def __init__(self, start, stop, typestr, comments):
         self.start = start
         self.stop = stop
         self.typestr = typestr
         self.comments = comments or []
 
     def __str__(self):
+        return self.typestr
+
+    def size(self):
+        return int(self.stop - self.start)
+
+    def start_str(self):
+        # This method is used in root-cell-config.c.tmpl
+
+        # Python 2 appends a 'L' to hexadecimal format of large integers,
+        # therefore .strip('L') is necessary.
+        return hex(self.start).strip('L')
+
+    def size_str(self):
+        # Comments from start_str() apply here as well.
+        return hex(self.size()).strip('L')
+
+
+class MemRegion(IORegion):
+    def __init__(self, start, stop, typestr, comments=None):
+        super(MemRegion, self).__init__(start, stop, typestr, comments)
+
+    def __str__(self):
         return 'MemRegion: %08x-%08x : %s' % \
-            (self.start, self.stop, self.typestr)
+            (self.start, self.stop, super(MemRegion, self).__str__())
 
     def size(self):
         # round up to full PAGE_SIZE
-        return int((self.stop - self.start + 0xfff) / 0x1000) * 0x1000
+        return int((super(MemRegion, self).size() + 0xfff) / 0x1000) * 0x1000
 
     def flagstr(self, p=''):
         if (
-            self.typestr == 'System RAM' or
-            self.typestr == 'Kernel' or
-            self.typestr == 'RAM buffer' or
-            self.typestr == 'ACPI DMAR RMRR' or
-            self.typestr == 'ACPI IVRS'
+                self.typestr == 'System RAM' or
+                self.typestr == 'Kernel' or
+                self.typestr == 'RAM buffer' or
+                self.typestr == 'ACPI DMAR RMRR' or
+                self.typestr == 'ACPI IVRS'
         ):
             s = 'JAILHOUSE_MEM_READ | JAILHOUSE_MEM_WRITE |\n'
             s += p + '\t\tJAILHOUSE_MEM_EXECUTE | JAILHOUSE_MEM_DMA'
             return s
         return 'JAILHOUSE_MEM_READ | JAILHOUSE_MEM_WRITE'
+
+
+class PortRegion(IORegion):
+    def __init__(self, start, stop, typestr, permit=False, comments=None):
+        super(PortRegion, self).__init__(start, stop, typestr, comments)
+        self.permit = permit
+
+    def __str__(self):
+        return 'Port I/O: %04x-%04x : %s' % \
+            (self.start, self.stop, super(PortRegion, self).__str__())
+
+    def size(self):
+        return super(PortRegion, self).size() + 1
 
 
 class IOAPIC:
@@ -795,81 +993,70 @@ class IOAPIC:
         return (self.iommu << 16) | self.bdf
 
 
-class IOMemRegionTree:
+class IORegionTree:
     def __init__(self, region, level):
         self.region = region
         self.level = level
         self.parent = None
         self.children = []
 
-    def __str__(self):
-        s = ''
-        if (self.region):
-            s = (' ' * (self.level - 1)) + str(self.region)
-            if self.parent and self.parent.region:
-                s += ' --> ' + self.parent.region.typestr
-            s += '\n'
-        for c in self.children:
-            s += str(c)
-        return s
+    def __iter__(self):
+        for child in self.children:
+            yield child
 
-    def regions_split_by_kernel(self):
-        kernel = [x for x in self.children if
-                  x.region.typestr.startswith('Kernel ')]
+    def get_leaves(self):
+        leaves = []
 
-        if (len(kernel) == 0):
-            return [self.region]
+        if self.children:
+            for child in self.children:
+                leaves.extend(child.get_leaves())
+        elif self.region is not None:
+            leaves.append(self.region)
 
-        r = self.region
-        s = r.typestr
+        return leaves
 
-        kernel_start = kernel[0].region.start
-        kernel_stop = kernel[len(kernel) - 1].region.stop
+    # find specific regions in tree
+    def find_regions_by_name(self, name):
+        regions = []
 
-        # align this for 16M, but only if we have enough space
-        kernel_stop = (kernel_stop & ~0xFFFFFF) + 0xFFFFFF
-        if (kernel_stop > r.stop):
-            kernel_stop = r.stop
+        for tree in self.children:
+            r = tree.region
+            s = r.typestr
 
-        before_kernel = None
-        after_kernel = None
+            if s.find(name) >= 0:
+                regions.append(r)
 
-        # before Kernel if any
-        if (r.start < kernel_start):
-            before_kernel = MemRegion(r.start, kernel_start - 1, s)
+            # if the tree continues recurse further down ...
+            if tree.children:
+                regions.extend(tree.find_regions_by_name(name))
 
-        kernel_region = MemRegion(kernel_start, kernel_stop, "Kernel")
-
-        # after Kernel if any
-        if (r.stop > kernel_stop):
-            after_kernel = MemRegion(kernel_stop + 1, r.stop, s)
-
-        return [before_kernel, kernel_region, after_kernel]
+        return regions
 
     @staticmethod
-    def parse_iomem_line(line):
-        a = line.split(':', 1)
-        level = int(a[0].count(' ') / 2) + 1
-        region = a[0].split('-', 1)
-        a[1] = a[1].strip()
-        return level, MemRegion(int(region[0], 16), int(region[1], 16), a[1])
+    def parse_io_line(line, TargetClass):
+        (region, type) = line.split(' : ', 1)
+        level = int(region.count(' ') / 2) + 1
+        type = type.strip()
+        region = [r.strip() for r in region.split('-', 1)]
+
+        return level, TargetClass(int(region[0], 16), int(region[1], 16), type)
 
     @staticmethod
-    def parse_iomem_file():
-        root = IOMemRegionTree(None, 0)
-        f = input_open('/proc/iomem')
+    def parse_io_file(filename, TargetClass):
+        root = IORegionTree(None, 0)
+        f = input_open(filename)
         lastlevel = 0
         lastnode = root
         for line in f:
-            (level, r) = IOMemRegionTree.parse_iomem_line(line)
-            t = IOMemRegionTree(r, level)
-            if (t.level > lastlevel):
+            (level, r) = IORegionTree.parse_io_line(line, TargetClass)
+            t = IORegionTree(r, level)
+            if t.level > lastlevel:
                 t.parent = lastnode
-            if (t.level == lastlevel):
+            if t.level == lastlevel:
                 t.parent = lastnode.parent
-            if (t.level < lastlevel):
+            if t.level < lastlevel:
                 p = lastnode.parent
-                while(t.level < p.level):
+                while t.level < p.level:
                     p = p.parent
                 t.parent = p.parent
 
@@ -880,73 +1067,10 @@ class IOMemRegionTree:
 
         return root
 
-    # find specific regions in tree
-    @staticmethod
-    def find_regions_by_name(tree, name):
-        regions = []
-
-        for tree in tree.children:
-            r = tree.region
-            s = r.typestr
-
-            if (s.find(name) >= 0):
-                regions.append(r)
-
-            # if the tree continues recurse further down ...
-            if (len(tree.children) > 0):
-                regions.extend(
-                    IOMemRegionTree.find_regions_by_name(tree, name))
-
-        return regions
-
-    # recurse down the tree
-    @staticmethod
-    def parse_iomem_tree(tree):
-        regions = []
-        dmar_regions = []
-
-        for tree in tree.children:
-            r = tree.region
-            s = r.typestr
-
-            # System RAM on the first level will be added completely,
-            # if they don't contain the kernel itself, if they do,
-            # we split them
-            if (tree.level == 1 and s == 'System RAM'):
-                regions.extend(tree.regions_split_by_kernel())
-                continue
-
-            # blacklisted on all levels
-            if (
-                (s.find('PCI MMCONFIG') >= 0) or
-                (s.find('APIC') >= 0)  # covers both APIC and IOAPIC
-            ):
-                continue
-
-            # generally blacklisted, with a few exceptions
-            if (s.lower() == 'reserved'):
-                regions.extend(
-                    IOMemRegionTree.find_regions_by_name(tree, 'HPET'))
-                dmar_regions.extend(
-                    IOMemRegionTree.find_regions_by_name(tree, 'dmar'))
-                continue
-
-            # if the tree continues recurse further down ...
-            if (len(tree.children) > 0):
-                (temp_regions, temp_dmar_regions) = \
-                    IOMemRegionTree.parse_iomem_tree(tree)
-                regions.extend(temp_regions)
-                dmar_regions.extend(temp_dmar_regions)
-                continue
-
-            # add all remaining leaves
-            regions.append(r)
-
-        return regions, dmar_regions
-
 
 class IOMMUConfig:
     def __init__(self, props):
+        self.type = props['type']
         self.base_addr = props['base_addr']
         self.mmio_size = props['mmio_size']
         if 'amd_bdf' in props:
