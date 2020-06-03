@@ -77,9 +77,6 @@ void arch_flush_cell_vcpu_caches(struct cell *cell)
 			vcpu_tlb_flush();
 		} else {
 			public_per_cpu(cpu)->flush_vcpu_caches = true;
-			/* make sure the value is written before we kick
-			 * the remote core */
-			memory_barrier();
 			apic_send_nmi_ipi(public_per_cpu(cpu));
 		}
 }
@@ -96,8 +93,6 @@ void arch_cell_reset(struct cell *cell)
 
 	comm_region->pm_timer_address =
 		system_config->platform_info.x86.pm_timer_address;
-	comm_region->pci_mmconfig_base =
-		system_config->platform_info.pci_mmconfig_base;
 	/* comm_region, and hence num_cpus, is zero-initialised */
 	for_each_cpu(cpu, cell->cpu_set)
 		comm_region->num_cpus++;

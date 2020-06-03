@@ -18,7 +18,6 @@
 #include <jailhouse/control.h>
 #include <jailhouse/mmio.h>
 #include <asm/apic.h>
-#include <asm/bitops.h>
 #include <asm/control.h>
 
 #define XAPIC_REG(x2apic_reg)		((x2apic_reg) << 4)
@@ -34,7 +33,7 @@ bool using_x2apic;
 /**
  * Mapping from a physical APIC ID to the logical CPU ID as used by Jailhouse.
  */
-u8 apic_to_cpu_id[] = { [0 ... APIC_MAX_PHYS_ID] = CPU_ID_INVALID };
+static u8 apic_to_cpu_id[] = { [0 ... APIC_MAX_PHYS_ID] = CPU_ID_INVALID };
 
 /* Initialized for x2APIC, adjusted for xAPIC during init */
 static u32 apic_reserved_bits[] = {
@@ -90,6 +89,10 @@ static void send_xapic_ipi(u32 apic_id, u32 icr_lo)
 {
 	while (read_xapic(APIC_REG_ICR) & APIC_ICR_DS_PENDING)
 		cpu_relax();
+	/*
+	 * No need for an explicit barrier, the mmio access serves as
+	 * implicit one.
+	 */
 	mmio_write32(xapic_page + XAPIC_REG(APIC_REG_ICR_HI),
 		     apic_id << XAPIC_DEST_SHIFT);
 	mmio_write32(xapic_page + XAPIC_REG(APIC_REG_ICR), icr_lo);
@@ -112,6 +115,13 @@ static void write_x2apic(unsigned int reg, u32 val)
 
 static void send_x2apic_ipi(u32 apic_id, u32 icr_lo)
 {
+	/*
+	 * Intel SDM, Volume 3, 10.12.3:
+	 * We either have to execute a serializing instruction or the
+	 * mfence;lfence sequence to publish data changes before the IPI goes
+	 * out. The latter is clearer and likely also faster.
+	 */
+	asm volatile("mfence; lfence" : : : "memory");
 	write_msr(MSR_X2APIC_BASE + APIC_REG_ICR,
 		  ((unsigned long)apic_id) << 32 | icr_lo);
 }

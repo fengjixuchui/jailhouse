@@ -15,14 +15,13 @@
 #include <jailhouse/printk.h>
 #include <jailhouse/processor.h>
 #include <jailhouse/string.h>
-#include <asm/bitops.h>
 #include <asm/spinlock.h>
 
 bool virtual_console = false;
 volatile struct jailhouse_virt_console console
 	__attribute__((section(".console")));
 
-static DEFINE_SPINLOCK(printk_lock);
+static spinlock_t printk_lock;
 
 static void console_write(const char *msg)
 {
@@ -263,7 +262,8 @@ void panic_printk(const char *fmt, ...)
 	unsigned long cpu_id = phys_processor_id();
 	va_list ap;
 
-	if (test_and_set_bit(0, &panic_in_progress) && panic_cpu != cpu_id)
+	if (atomic_test_and_set_bit(0, &panic_in_progress) &&
+	    panic_cpu != cpu_id)
 		return;
 	panic_cpu = cpu_id;
 

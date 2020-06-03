@@ -19,7 +19,6 @@
 #include <jailhouse/string.h>
 #include <jailhouse/unit.h>
 #include <jailhouse/utils.h>
-#include <asm/bitops.h>
 #include <asm/control.h>
 #include <asm/spinlock.h>
 
@@ -32,7 +31,7 @@ struct jailhouse_system *system_config;
 /** State structure of the root cell. @ingroup Control */
 struct cell root_cell;
 
-static DEFINE_SPINLOCK(shutdown_lock);
+static spinlock_t shutdown_lock;
 static unsigned int num_cells = 1;
 
 volatile unsigned long panic_in_progress;
@@ -103,6 +102,10 @@ static void suspend_cpu(unsigned int cpu_id)
 	target_data->suspend_cpu = true;
 	target_suspended = target_data->cpu_suspended;
 
+	/*
+	 * Acts as memory barrier on certain architectures to make suspend_cpu
+	 * visible. Otherwise, arch_send_event() will take care of that.
+	 */
 	spin_unlock(&target_data->control_lock);
 
 	if (!target_suspended) {
@@ -363,6 +366,8 @@ static void cell_destroy_internal(struct cell *cell)
 	unsigned int cpu, n;
 	struct unit *unit;
 
+	cell->comm_page.comm_region.cell_state = JAILHOUSE_CELL_SHUT_DOWN;
+
 	for_each_cpu(cpu, cell->cpu_set) {
 		arch_park_cpu(cpu);
 
@@ -398,7 +403,7 @@ static void cell_destroy_internal(struct cell *cell)
 
 static int cell_create(struct per_cpu *cpu_data, unsigned long config_address)
 {
-	unsigned long cfg_page_offs = config_address & ~PAGE_MASK;
+	unsigned long cfg_page_offs = config_address & PAGE_OFFS_MASK;
 	unsigned int cfg_pages, cell_pages, cpu, n;
 	const struct jailhouse_memory *mem;
 	struct jailhouse_cell_desc *cfg;
@@ -655,6 +660,8 @@ static int cell_start(struct per_cpu *cpu_data, unsigned long id)
 	if (CELL_FLAGS_VIRTUAL_CONSOLE_ACTIVE(cell->config->flags))
 		comm_region->flags |= JAILHOUSE_COMM_FLAG_DBG_PUTC_ACTIVE;
 	comm_region->console = cell->config->console;
+	comm_region->pci_mmconfig_base =
+		system_config->platform_info.pci_mmconfig_base;
 
 	pci_cell_reset(cell);
 	arch_cell_reset(cell);

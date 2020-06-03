@@ -19,9 +19,10 @@
 struct {
 	struct jailhouse_system header;
 	__u64 cpus[1];
-	struct jailhouse_memory mem_regions[33];
+	struct jailhouse_memory mem_regions[36];
 	struct jailhouse_irqchip irqchips[6];
 	struct jailhouse_pci_device pci_devices[1];
+	__u32 stream_ids[30];
 } __attribute__((packed)) config = {
 	.header = {
 		.signature = JAILHOUSE_SYSTEM_SIGNATURE,
@@ -50,6 +51,35 @@ struct {
 				.gicr_base = 0x01900000,
 				.maintenance_irq = 25,
 			},
+			.arm.iommu_units= {
+				{
+					.type = JAILHOUSE_IOMMU_SMMUV3,
+					.base = 0x36600000,
+					.size = 0x100000,
+				},
+				{
+					.type = JAILHOUSE_IOMMU_PVU,
+					.base = 0x30f80000,
+					.size = 0x1000,
+					.tipvu.tlb_base = 0x36000000,
+					.tipvu.tlb_size = 0x40000,
+				},
+				{
+					.type = JAILHOUSE_IOMMU_PVU,
+					.base = 0x30f81000,
+					.size = 0x1000,
+					.tipvu.tlb_base = 0x36040000,
+					.tipvu.tlb_size = 0x40000,
+				},
+				{
+					.type = JAILHOUSE_IOMMU_PVU,
+					.base = 0x30f83000,
+					.size = 0x1000,
+					.tipvu.tlb_base = 0x360c0000,
+					.tipvu.tlb_size = 0x40000,
+				},
+			},
+
 		},
 		.root_cell = {
 			.name = "k3-j721e-evm",
@@ -58,6 +88,7 @@ struct {
 			.num_memory_regions = ARRAY_SIZE(config.mem_regions),
 			.num_irqchips = ARRAY_SIZE(config.irqchips),
 			.num_pci_devices = ARRAY_SIZE(config.pci_devices),
+			.num_stream_ids = ARRAY_SIZE(config.stream_ids),
 			.vpci_irq_base = 191 - 32,
 		},
 	},
@@ -67,12 +98,8 @@ struct {
 	},
 
 	.mem_regions = {
-		/* IVSHMEM shared memory region for 00:00.0 */ {
-			.phys_start = 0x89fe00000,
-			.virt_start = 0x89fe00000,
-			.size = 0x100000,
-			.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_WRITE,
-		},
+		/* IVSHMEM shared memory region for 00:01.0 */
+		JAILHOUSE_SHMEM_NET_REGIONS(0x89fe00000, 0),
 		/* ctrl mmr */ {
 			.phys_start = 0x00100000,
 			.virt_start = 0x00100000,
@@ -348,16 +375,27 @@ struct {
 	},
 
 	.pci_devices = {
-		/* 0001:00:00.0 */ {
+		/* 0003:00:01.0 */ {
 			.type = JAILHOUSE_PCI_TYPE_IVSHMEM,
 			.domain = 3,
-			.bdf = 0x00,
-			.bar_mask = {
-				0xffffff00, 0xffffffff, 0x00000000,
-				0x00000000, 0x00000000, 0x00000000,
-			},
-			.shmem_region = 0,
+			.bdf = 1 << 3,
+			.bar_mask = JAILHOUSE_IVSHMEM_BAR_MASK_INTX,
+			.shmem_regions_start = 0,
+			.shmem_dev_id = 0,
+			.shmem_peers = 2,
 			.shmem_protocol = JAILHOUSE_SHMEM_PROTO_VETH,
 		},
+	},
+
+	.stream_ids = {
+		/* Non PCIe peripherals */
+		0x0002, 0xf002,
+		/* PCI1 */
+		0x0100, 0x0101, 0x0102, 0x0103, 0x0104, 0x0105, 0x0106, 0x0107,
+		0x0108, 0x0109, 0x010a, 0x010b, 0x010c, 0x010d, 0x010e, 0x010f,
+		/* PCI2 */
+		0x4100, 0x4101, 0x4102, 0x4103, 0x4104, 0x4105,
+		/* PCI3 */
+		0x8100, 0x8101, 0x8102, 0x8103, 0x8104, 0x8105,
 	},
 };

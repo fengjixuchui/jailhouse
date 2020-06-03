@@ -36,8 +36,9 @@ void arm_cpu_park(void)
 	arm_paging_vcpu_init(&parking_pt);
 }
 
-void arm_cpu_kick(unsigned int cpu_id)
+void arch_send_event(struct public_per_cpu *target_data)
 {
+	unsigned int cpu_id = target_data->cpu_id;
 	struct sgi sgi;
 
 	sgi.targets = irqchip_get_cpu_target(cpu_id);
@@ -168,6 +169,7 @@ void arch_cell_reset(struct cell *cell)
 	comm_region->gicd_base = system_config->platform_info.arm.gicd_base;
 	comm_region->gicc_base = system_config->platform_info.arm.gicc_base;
 	comm_region->gicr_base = system_config->platform_info.arm.gicr_base;
+	comm_region->vpci_irq_base = cell->config->vpci_irq_base;
 
 	/*
 	 * All CPUs but the first are initially suspended.  The first CPU

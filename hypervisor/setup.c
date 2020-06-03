@@ -26,7 +26,7 @@ extern u8 __text_start[], __page_pool[];
 
 static const __attribute__((aligned(PAGE_SIZE))) u8 empty_page[PAGE_SIZE];
 
-static DEFINE_SPINLOCK(init_lock);
+static spinlock_t init_lock;
 static unsigned int master_cpu_id = -1;
 static volatile unsigned int entered_cpus, initialized_cpus;
 static volatile int error;
@@ -128,7 +128,8 @@ static void cpu_init(struct per_cpu *cpu_data)
 	/* set up private mapping of per-CPU data structure */
 	err = paging_create(&cpu_data->pg_structs, paging_hvirt2phys(cpu_data),
 			    sizeof(*cpu_data), LOCAL_CPU_BASE,
-			    PAGE_DEFAULT_FLAGS, PAGING_NON_COHERENT);
+			    PAGE_DEFAULT_FLAGS,
+			    PAGING_NON_COHERENT | PAGING_HUGE);
 	if (err)
 		goto failed;
 
@@ -141,7 +142,7 @@ static void cpu_init(struct per_cpu *cpu_data)
 	err = paging_create(&cpu_data->pg_structs, 0,
 			    NUM_TEMPORARY_PAGES * PAGE_SIZE,
 			    TEMPORARY_MAPPING_BASE, PAGE_NONPRESENT_FLAGS,
-			    PAGING_NON_COHERENT);
+			    PAGING_NON_COHERENT | PAGING_NO_HUGE);
 	if (err)
 		goto failed;
 

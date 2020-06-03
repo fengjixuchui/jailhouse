@@ -10,11 +10,6 @@
  * the COPYING file in the top-level directory.
  */
 
-#ifndef _JAILHOUSE_ASM_IVSHMEM_H
-#define _JAILHOUSE_ASM_IVSHMEM_H
-
-struct arch_pci_ivshmem {
-	u16 irq_id;
+struct arch_ivshmem_irq_cache {
+	u16 id[IVSHMEM_MSIX_VECTORS];
 };
-
-#endif /* !_JAILHOUSE_ASM_IVSHMEM_H */

@@ -99,8 +99,6 @@ extern bool jailhouse_use_vmcall;
 struct jailhouse_comm_region {
 	COMM_REGION_GENERIC_HEADER;
 
-	/** Base address of PCI memory mapped config (x86-specific). */
-	__u64 pci_mmconfig_base;
 	/** I/O port address of the PM timer (x86-specific). */
 	__u16 pm_timer_address;
 	/** Number of CPUs available to the cell (x86-specific). */
@@ -110,7 +108,7 @@ struct jailhouse_comm_region {
 	/** Calibrated APIC timer frequency in kHz or 0 if TSC deadline timer
 	 * is available (x86-specific). */
 	__u32 apic_khz;
-};
+} __attribute__((packed));
 
 /**
  * Invoke a hypervisor without additional arguments.

@@ -23,7 +23,7 @@
 struct {
 	struct jailhouse_cell_desc cell;
 	__u64 cpus[1];
-	struct jailhouse_memory mem_regions[9];
+	struct jailhouse_memory mem_regions[12];
 	struct jailhouse_irqchip irqchips[3];
 	struct jailhouse_pci_device pci_devices[1];
 } __attribute__((packed)) config = {
@@ -54,6 +54,8 @@ struct {
 	},
 
 	.mem_regions = {
+		/* IVSHMEM shared memory region for 00:01.0 */
+		JAILHOUSE_SHMEM_NET_REGIONS(0x8dfb00000, 1),
 		/* RAM load */ {
 			.phys_start = 0x8FFFF0000,
 			.virt_start = 0x0,
@@ -69,12 +71,6 @@ struct {
 			.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_WRITE |
 				JAILHOUSE_MEM_EXECUTE | JAILHOUSE_MEM_DMA |
 				JAILHOUSE_MEM_LOADABLE,
-		},
-		/* IVSHMEM shared memory region for 00:00.0 */ {
-			.phys_start = 0x8dfb00000,
-			.virt_start = 0x8dfb00000,
-			.size = 0x100000,
-			.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_WRITE,
 		},
 		/* MCU UART0 */ {
 			.phys_start = 0x40a00000,
@@ -124,7 +120,7 @@ struct {
 			.address = 0x01800000,
 			.pin_base = 160,
 			.pin_bitmap = {
-			1 << (189 - 160), 0x0, 0x00, 0,
+			1 << (190 - 160), 0x0, 0x00, 0,
 			},
 		},
 		{
@@ -137,14 +133,13 @@ struct {
 	},
 
 	.pci_devices = {
-		/* 00:00.0 */ {
+		/* 00:01.0 */ {
 			.type = JAILHOUSE_PCI_TYPE_IVSHMEM,
-			.bdf = 0x00,
-			.bar_mask = {
-				0xffffff00, 0xffffffff, 0x00000000,
-				0x00000000, 0x00000000, 0x00000000,
-			},
-			.shmem_region = 2,
+			.bdf = 1 << 3,
+			.bar_mask = JAILHOUSE_IVSHMEM_BAR_MASK_INTX,
+			.shmem_regions_start = 0,
+			.shmem_dev_id = 1,
+			.shmem_peers = 2,
 			.shmem_protocol = JAILHOUSE_SHMEM_PROTO_VETH,
 		},
 	},

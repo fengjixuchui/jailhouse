@@ -22,7 +22,6 @@
 #include <jailhouse/unit.h>
 #include <asm/apic.h>
 #include <asm/iommu.h>
-#include <asm/bitops.h>
 #include <asm/ioapic.h>
 #include <asm/spinlock.h>
 
@@ -201,7 +200,7 @@ static void *unit_inv_queue;
 static unsigned int dmar_units;
 static unsigned int dmar_pt_levels;
 static unsigned int dmar_num_did = ~0U;
-static DEFINE_SPINLOCK(inv_queue_lock);
+static spinlock_t inv_queue_lock;
 static struct vtd_emulation root_cell_units[JAILHOUSE_MAX_IOMMU_UNITS];
 static bool dmar_units_initialized;
 
@@ -400,7 +399,7 @@ static int vtd_emulate_inv_int(unsigned int unit_no, unsigned int index)
 	device = pci_get_assigned_device(&root_cell, irte_usage->device_id);
 	/* On x86, ivshmem devices only support MSI-X. */
 	if (device && device->info->type == JAILHOUSE_PCI_TYPE_IVSHMEM)
-		return arch_ivshmem_update_msix(device);
+		return ivshmem_update_msix_vector(device, irte_usage->vector);
 
 	irq_msg = iommu_get_remapped_root_int(unit_no, irte_usage->device_id,
 					      irte_usage->vector, index);
@@ -483,7 +482,8 @@ static enum mmio_result vtd_unit_access_handler(void *arg,
 		return MMIO_HANDLED;
 	}
 	if (mmio->address == VTD_IQT_REG && mmio->is_write) {
-		while (unit->iqh != (mmio->value & ~PAGE_MASK)) {
+		while (unit->iqh !=
+		       (mmio->value & VTD_IQT_QT_MASK & PAGE_OFFS_MASK)) {
 			inv_desc_page =
 				paging_get_guest_pages(NULL, unit->iqa, 1,
 						       PAGE_READONLY_FLAGS);
@@ -497,7 +497,7 @@ static enum mmio_result vtd_unit_access_handler(void *arg,
 				goto invalid_iq_entry;
 
 			unit->iqh += 1 << VTD_IQH_QH_SHIFT;
-			unit->iqh &= ~PAGE_MASK;
+			unit->iqh &= PAGE_OFFS_MASK;
 		}
 		return MMIO_HANDLED;
 	}
@@ -749,7 +749,8 @@ static int vtd_cell_init(struct cell *cell)
 int iommu_map_memory_region(struct cell *cell,
 			    const struct jailhouse_memory *mem)
 {
-	u32 flags = 0;
+	unsigned long access_flags = 0;
+	unsigned long paging_flags = PAGING_COHERENT | PAGING_HUGE;
 
 	if (!(mem->flags & JAILHOUSE_MEM_DMA))
 		return 0;
@@ -758,13 +759,15 @@ int iommu_map_memory_region(struct cell *cell,
 		return trace_error(-E2BIG);
 
 	if (mem->flags & JAILHOUSE_MEM_READ)
-		flags |= VTD_PAGE_READ;
+		access_flags |= VTD_PAGE_READ;
 	if (mem->flags & JAILHOUSE_MEM_WRITE)
-		flags |= VTD_PAGE_WRITE;
+		access_flags |= VTD_PAGE_WRITE;
+	if (mem->flags & JAILHOUSE_MEM_NO_HUGEPAGES)
+		paging_flags &= ~PAGING_HUGE;
 
 	return paging_create(&cell->arch.vtd.pg_structs, mem->phys_start,
-			     mem->size, mem->virt_start, flags,
-			     PAGING_COHERENT);
+			     mem->size, mem->virt_start, access_flags,
+			     paging_flags);
 }
 
 int iommu_unmap_memory_region(struct cell *cell,
@@ -798,7 +801,8 @@ iommu_get_remapped_root_int(unsigned int iommu, u16 device_id,
 	if (!irte_page)
 		return irq_msg;
 
-	root_irte = *(union vtd_irte *)(irte_page + (irte_addr & ~PAGE_MASK));
+	root_irte = *(union vtd_irte *)(irte_page +
+					(irte_addr & PAGE_OFFS_MASK));
 
 	irq_msg.valid =
 		(root_irte.field.p && root_irte.field.sid == device_id);
@@ -1032,7 +1036,7 @@ static int vtd_init(void)
 		err = paging_create(&hv_paging_structs, unit->base, unit->size,
 				    (unsigned long)reg_base,
 				    PAGE_DEFAULT_FLAGS | PAGE_FLAG_DEVICE,
-				    PAGING_NON_COHERENT);
+				    PAGING_NON_COHERENT | PAGING_HUGE);
 		if (err)
 			return err;
 

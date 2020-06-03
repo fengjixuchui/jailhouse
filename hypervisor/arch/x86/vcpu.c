@@ -26,10 +26,9 @@
 #include <jailhouse/percpu.h>
 #include <asm/vcpu.h>
 
-#define for_each_pio_region(pio, config, counter)	\
-	for ((pio) = jailhouse_cell_pio(config),	\
-	     (counter) = 0;				\
-	     (counter) < (config)->num_pio_regions;	\
+#define for_each_pio_region(pio, config, counter)		\
+	for ((pio) = jailhouse_cell_pio(config), (counter) = 0;	\
+	     (counter) < (config)->num_pio_regions;		\
 	     (pio)++, (counter)++)
 
 static u8 __attribute__((aligned(PAGE_SIZE))) parking_code[PAGE_SIZE] = {
@@ -50,7 +49,7 @@ int vcpu_early_init(void)
 	/* Map guest parking code (shared between cells and CPUs) */
 	return paging_create(&parking_pt, paging_hvirt2phys(parking_code),
 			     PAGE_SIZE, 0, PAGE_READONLY_FLAGS | PAGE_FLAG_US,
-			     PAGING_NON_COHERENT);
+			     PAGING_NON_COHERENT | PAGING_NO_HUGE);
 }
 
 /* Can be overridden in vendor-specific code if needed */

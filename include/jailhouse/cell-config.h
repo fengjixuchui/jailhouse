@@ -74,8 +74,6 @@
 
 #define JAILHOUSE_CELL_DESC_SIGNATURE	"JHCELL"
 
-#define JAILHOUSE_INVALID_STREAMID			(~0)
-
 /**
  * The jailhouse cell configuration.
  *
@@ -115,7 +113,8 @@ struct jailhouse_cell_desc {
 #define JAILHOUSE_MEM_COMM_REGION	0x0020
 #define JAILHOUSE_MEM_LOADABLE		0x0040
 #define JAILHOUSE_MEM_ROOTSHARED	0x0080
-#define JAILHOUSE_MEM_IO_UNALIGNED	0x0100
+#define JAILHOUSE_MEM_NO_HUGEPAGES	0x0100
+#define JAILHOUSE_MEM_IO_UNALIGNED	0x8000
 #define JAILHOUSE_MEM_IO_WIDTH_SHIFT	16 /* uses bits 16..19 */
 #define JAILHOUSE_MEM_IO_8		(1 << JAILHOUSE_MEM_IO_WIDTH_SHIFT)
 #define JAILHOUSE_MEM_IO_16		(2 << JAILHOUSE_MEM_IO_WIDTH_SHIFT)
@@ -129,8 +128,31 @@ struct jailhouse_memory {
 	__u64 flags;
 } __attribute__((packed));
 
+#define JAILHOUSE_SHMEM_NET_REGIONS(start, dev_id)			\
+	{								\
+		.phys_start = start,					\
+		.virt_start = start,					\
+		.size = 0x1000,						\
+		.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_ROOTSHARED,	\
+	},								\
+	{ 0 },								\
+	{								\
+		.phys_start = (start) + 0x1000,				\
+		.virt_start = (start) + 0x1000,				\
+		.size = 0x7f000,					\
+		.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_ROOTSHARED | \
+			((dev_id == 0) ? JAILHOUSE_MEM_WRITE : 0),	\
+	},								\
+	{								\
+		.phys_start = (start) + 0x80000,			\
+		.virt_start = (start) + 0x80000,			\
+		.size = 0x7f000,					\
+		.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_ROOTSHARED | \
+			((dev_id == 1) ? JAILHOUSE_MEM_WRITE : 0),	\
+	}
+
 #define JAILHOUSE_MEMORY_IS_SUBPAGE(mem)	\
-	((mem)->virt_start & ~PAGE_MASK || (mem)->size & ~PAGE_MASK)
+	((mem)->virt_start & PAGE_OFFS_MASK || (mem)->size & PAGE_OFFS_MASK)
 
 #define JAILHOUSE_CACHE_L3_CODE		0x01
 #define JAILHOUSE_CACHE_L3_DATA		0x02
@@ -158,9 +180,15 @@ struct jailhouse_irqchip {
 #define JAILHOUSE_PCI_TYPE_BRIDGE	0x02
 #define JAILHOUSE_PCI_TYPE_IVSHMEM	0x03
 
-#define JAILHOUSE_SHMEM_PROTO_UNDEFINED	0x0000
-#define JAILHOUSE_SHMEM_PROTO_VETH	0x0100
-#define JAILHOUSE_SHMEM_PROTO_CUSTOM	0x8000	/* 0x80xx..0xffxx */
+#define JAILHOUSE_SHMEM_PROTO_UNDEFINED		0x0000
+#define JAILHOUSE_SHMEM_PROTO_VETH		0x0001
+#define JAILHOUSE_SHMEM_PROTO_CUSTOM		0x4000	/* 0x4000..0x7fff */
+#define JAILHOUSE_SHMEM_PROTO_VIRTIO_FRONT	0x8000	/* 0x8000..0xbfff */
+#define JAILHOUSE_SHMEM_PROTO_VIRTIO_BACK	0xc000	/* 0xc000..0xffff */
+
+#define VIRTIO_DEV_NET				1
+#define VIRTIO_DEV_BLOCK			2
+#define VIRTIO_DEV_CONSOLE			3
 
 struct jailhouse_pci_device {
 	__u8 type;
@@ -176,12 +204,27 @@ struct jailhouse_pci_device {
 	__u16 num_msix_vectors;
 	__u16 msix_region_size;
 	__u64 msix_address;
-	/** Memory region index of virtual shared memory device. */
-	__u32 shmem_region;
-	/** PCI subclass and interface ID of virtual shared memory device. */
+	/** First memory region index of shared memory device. */
+	__u32 shmem_regions_start;
+	/** ID of shared memory device (0..shmem_peers-1). */
+	__u8 shmem_dev_id;
+	/** Maximum number of peers connected via this shared memory device. */
+	__u8 shmem_peers;
+	/** PCI subclass and interface ID of shared memory device. */
 	__u16 shmem_protocol;
-	__u8 padding[2];
 } __attribute__((packed));
+
+#define JAILHOUSE_IVSHMEM_BAR_MASK_INTX			\
+	{						\
+		0xfffff000, 0x00000000, 0x00000000,	\
+		0x00000000, 0x00000000, 0x00000000,	\
+	}
+
+#define JAILHOUSE_IVSHMEM_BAR_MASK_MSIX			\
+	{						\
+		0xfffff000, 0xfffffe00, 0x00000000,	\
+		0x00000000, 0x00000000, 0x00000000,	\
+	}
 
 #define JAILHOUSE_PCI_EXT_CAP		0x8000
 
@@ -203,16 +246,26 @@ struct jailhouse_pci_capability {
 #define JAILHOUSE_IOMMU_AMD		1
 #define JAILHOUSE_IOMMU_INTEL		2
 #define JAILHOUSE_IOMMU_SMMUV3		3
+#define JAILHOUSE_IOMMU_PVU		4
 
 struct jailhouse_iommu {
 	__u32 type;
 	__u64 base;
 	__u32 size;
 
-	__u16 amd_bdf;
-	__u8 amd_base_cap;
-	__u8 amd_msi_cap;
-	__u32 amd_features;
+	union {
+		struct {
+			__u16 bdf;
+			__u8 base_cap;
+			__u8 msi_cap;
+			__u32 features;
+		} __attribute__((packed)) amd;
+
+		struct {
+			__u64 tlb_base;
+			__u32 tlb_size;
+		} __attribute__((packed)) tipvu;
+	};
 } __attribute__((packed));
 
 struct jailhouse_pio {

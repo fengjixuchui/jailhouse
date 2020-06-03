@@ -43,6 +43,10 @@
 
 #define PCI_CONE		(1 << 31)
 
+void pci_init(void)
+{
+}
+
 u32 pci_read_config(u16 bdf, unsigned int addr, unsigned int size)
 {
 	outl(PCI_CONE | ((u32)bdf << 8) | (addr & 0xfc), PCI_REG_ADDR_PORT);

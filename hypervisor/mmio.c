@@ -329,7 +329,7 @@ static enum mmio_result mmio_handle_subpage(void *arg, struct mmio_access *mmio)
 	err = paging_create(&this_cpu_data()->pg_structs, page_phys, PAGE_SIZE,
 			    TEMPORARY_MAPPING_BASE,
 			    PAGE_DEFAULT_FLAGS | PAGE_FLAG_DEVICE,
-			    PAGING_NON_COHERENT);
+			    PAGING_NON_COHERENT | PAGING_NO_HUGE);
 	if (err)
 		goto invalid_access;
 
@@ -337,13 +337,13 @@ static enum mmio_result mmio_handle_subpage(void *arg, struct mmio_access *mmio)
 	 * This virt_base gives the following effective virtual address in
 	 * mmio_perform_access:
 	 *
-	 *     TEMPORARY_MAPPING_BASE + (mem->phys_start & ~PAGE_MASK) +
-	 *         (mmio->address & ~PAGE_MASK)
+	 *     TEMPORARY_MAPPING_BASE + (mem->phys_start & PAGE_OFFS_MASK) +
+	 *         (mmio->address & PAGE_OFFS_MASK)
 	 *
 	 * Reason: mmio_perform_access does addr = base + mmio->address.
 	 */
-	virt_base = TEMPORARY_MAPPING_BASE + (mem->phys_start & ~PAGE_MASK) -
-		(mmio->address & PAGE_MASK);
+	virt_base = TEMPORARY_MAPPING_BASE + (mem->phys_start & PAGE_OFFS_MASK)
+		- (mmio->address & PAGE_MASK);
 	mmio_perform_access((void *)virt_base, mmio);
 	return MMIO_HANDLED;
 

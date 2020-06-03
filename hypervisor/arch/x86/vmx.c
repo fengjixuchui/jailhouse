@@ -345,26 +345,29 @@ int vcpu_vendor_cell_init(struct cell *cell)
 			     paging_hvirt2phys(apic_access_page),
 			     PAGE_SIZE, XAPIC_BASE,
 			     EPT_FLAG_READ | EPT_FLAG_WRITE | EPT_FLAG_WB_TYPE,
-			     PAGING_NON_COHERENT);
+			     PAGING_NON_COHERENT | PAGING_NO_HUGE);
 }
 
 int vcpu_map_memory_region(struct cell *cell,
 			   const struct jailhouse_memory *mem)
 {
 	u64 phys_start = mem->phys_start;
-	u32 flags = EPT_FLAG_WB_TYPE;
+	unsigned long access_flags = EPT_FLAG_WB_TYPE;
+	unsigned long paging_flags = PAGING_NON_COHERENT | PAGING_HUGE;
 
 	if (mem->flags & JAILHOUSE_MEM_READ)
-		flags |= EPT_FLAG_READ;
+		access_flags |= EPT_FLAG_READ;
 	if (mem->flags & JAILHOUSE_MEM_WRITE)
-		flags |= EPT_FLAG_WRITE;
+		access_flags |= EPT_FLAG_WRITE;
 	if (mem->flags & JAILHOUSE_MEM_EXECUTE)
-		flags |= EPT_FLAG_EXECUTE;
+		access_flags |= EPT_FLAG_EXECUTE;
 	if (mem->flags & JAILHOUSE_MEM_COMM_REGION)
 		phys_start = paging_hvirt2phys(&cell->comm_page);
+	if (mem->flags & JAILHOUSE_MEM_NO_HUGEPAGES)
+		paging_flags &= ~PAGING_HUGE;
 
 	return paging_create(&cell->arch.vmx.ept_structs, phys_start, mem->size,
-			     mem->virt_start, flags, PAGING_NON_COHERENT);
+			     mem->virt_start, access_flags, paging_flags);
 }
 
 int vcpu_unmap_memory_region(struct cell *cell,
