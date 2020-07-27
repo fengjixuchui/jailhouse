@@ -48,9 +48,9 @@
 
 /*
  * Incremented on any layout or semantic change of system or cell config.
- * Also update HEADER_REVISION in tools.
+ * Also update formats and HEADER_REVISION in pyjailhouse/config_parser.py.
  */
-#define JAILHOUSE_CONFIG_REVISION	12
+#define JAILHOUSE_CONFIG_REVISION	13
 
 #define JAILHOUSE_CELL_NAME_MAXLEN	31
 
@@ -226,6 +226,18 @@ struct jailhouse_pci_device {
 		0x00000000, 0x00000000, 0x00000000,	\
 	}
 
+#define JAILHOUSE_IVSHMEM_BAR_MASK_INTX_64K		\
+	{						\
+		0xffff0000, 0x00000000, 0x00000000,	\
+		0x00000000, 0x00000000, 0x00000000,	\
+	}
+
+#define JAILHOUSE_IVSHMEM_BAR_MASK_MSIX_64K		\
+	{						\
+		0xffff0000, 0xfffffe00, 0x00000000,	\
+		0x00000000, 0x00000000, 0x00000000,	\
+	}
+
 #define JAILHOUSE_PCI_EXT_CAP		0x8000
 
 #define JAILHOUSE_PCICAPS_WRITE		0x0001
@@ -306,27 +318,25 @@ struct jailhouse_system {
 		__u8 pci_mmconfig_end_bus;
 		__u8 pci_is_virtual;
 		__u16 pci_domain;
+		struct jailhouse_iommu iommu_units[JAILHOUSE_MAX_IOMMU_UNITS];
 		union {
 			struct {
 				__u16 pm_timer_address;
-				__u32 vtd_interrupt_limit;
 				__u8 apic_mode;
-				__u8 padding[3];
+				__u8 padding;
+				__u32 vtd_interrupt_limit;
 				__u32 tsc_khz;
 				__u32 apic_khz;
-				struct jailhouse_iommu
-					iommu_units[JAILHOUSE_MAX_IOMMU_UNITS];
 			} __attribute__((packed)) x86;
 			struct {
 				u8 maintenance_irq;
 				u8 gic_version;
+				u8 padding[2];
 				u64 gicd_base;
 				u64 gicc_base;
 				u64 gich_base;
 				u64 gicv_base;
 				u64 gicr_base;
-				struct jailhouse_iommu
-					iommu_units[JAILHOUSE_MAX_IOMMU_UNITS];
 			} __attribute__((packed)) arm;
 		} __attribute__((packed));
 	} __attribute__((packed)) platform_info;

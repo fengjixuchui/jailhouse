@@ -240,41 +240,63 @@ if jh_enabled == '1':
           file=sys.stderr)
     sys.exit(1)
 
+# Information collection
+#########################
+debug_console = DebugConsole(options.console)
+
+# System infromation
+product = [
+    input_readline('/sys/class/dmi/id/sys_vendor', True).rstrip(),
+    input_readline('/sys/class/dmi/id/product_name', True).rstrip(),
+]
+cpu_count = count_cpus()
+mmconfig = MMConfig.parse()
+
+# Query devices
+pci_devices = sysfs_parser.parse_pcidevices()
+(mem_regions, dmar_regions) = sysfs_parser.parse_iomem(pci_devices)
+(port_regions, pm_timer_base) = sysfs_parser.parse_ioports()
+ioapics = sysfs_parser.parse_madt()
+vendor = sysfs_parser.get_cpu_vendor()
+if vendor == 'GenuineIntel':
+    (iommu_units, extra_memregs) = sysfs_parser.parse_dmar(pci_devices, ioapics,
+                                                           dmar_regions)
+else:
+    (iommu_units, extra_memregs) = sysfs_parser.parse_ivrs(pci_devices, ioapics)
+mem_regions += extra_memregs
+
 IOAPIC_MAX_PINS = 120
 int_src_count = IOAPIC_MAX_PINS
 
-(pcidevices, pcicaps, cnt) = sysfs_parser.parse_pcidevices()
+# Collect all PCI capabilities
+pci_caps = []
+for i,d in enumerate(pci_devices):
+    if d.caps:
+        duplicate = False
+        # look for duplicate capability patterns
+        for d2 in pci_devices[:i]:
+            if d2.caps == d.caps:
+                # reused existing capability list, but record all users
+                d2.caps[0].comments.append(str(d))
+                d.caps_start = d2.caps_start
+                duplicate = True
+                break
+        if not duplicate:
+            d.caps[0].comments.append(str(d))
+            d.caps_start = len(pci_caps)
+            pci_caps.extend(d.caps)
+    int_src_count += max(d.num_msi_vectors, d.num_msix_vectors)
 
-int_src_count += cnt
 vtd_interrupt_limit = 2**math.ceil(math.log(int_src_count, 2))
 
-product = [input_readline('/sys/class/dmi/id/sys_vendor',
-                          True).rstrip(),
-           input_readline('/sys/class/dmi/id/product_name',
-                          True).rstrip()
-           ]
-
+# Determine hypervisor memory
 inmatemem = kmg_multiply_str(options.mem_inmates)
 hvmem = [0, kmg_multiply_str(options.mem_hv)]
-
-(mem_regions, dmar_regions) = sysfs_parser.parse_iomem(pcidevices)
-ourmem = parse_kernel_cmdline()
 total = hvmem[1] + inmatemem
 
-mmconfig = MMConfig.parse()
-
-ioapics = sysfs_parser.parse_madt()
-
-vendor = sysfs_parser.get_cpu_vendor()
-if vendor == 'GenuineIntel':
-    (iommu_units, extra_memregs) = sysfs_parser.parse_dmar(pcidevices, ioapics,
-                                                           dmar_regions)
-else:
-    (iommu_units, extra_memregs) = sysfs_parser.parse_ivrs(pcidevices, ioapics)
-mem_regions += extra_memregs
-
-# kernel does not have memmap region, pick one
+ourmem = parse_kernel_cmdline()
 if ourmem is None:
+    # kernel does not have memmap region, pick one
     ourmem = alloc_mem(mem_regions, total)
 elif (total > ourmem[1]):
     raise RuntimeError('Your memmap reservation is too small you need >="' +
@@ -282,22 +304,10 @@ elif (total > ourmem[1]):
                        '"memmap=' + hex(total) + '$' + hex(ourmem[0]) + '"')
 
 hvmem[0] = ourmem[0]
+mem_regions.append(sysfs_parser.MemRegion(ourmem[0] + hvmem[1],
+                                          ourmem[0] + hvmem[1] + inmatemem - 1,
+                                          'JAILHOUSE Inmate Memory'))
 
-inmatereg = sysfs_parser.MemRegion(ourmem[0] + hvmem[1],
-                                   ourmem[0] + hvmem[1] + inmatemem - 1,
-                                   'JAILHOUSE Inmate Memory')
-mem_regions.append(inmatereg)
-
-cpucount = count_cpus()
-
-port_regions, pm_timer_base = sysfs_parser.parse_ioports()
-
-debug_console = DebugConsole(options.console)
-
-
-f = open(options.file, 'w')
-tmpl = Template(filename=os.path.join(options.template_dir,
-                                      'root-cell-config.c.tmpl'))
 kwargs = {
     'mem_regions': mem_regions,
     'port_regions': port_regions,
@@ -305,9 +315,9 @@ kwargs = {
     'argstr': ' '.join(sys.argv),
     'hvmem': hvmem,
     'product': product,
-    'pcidevices': pcidevices,
-    'pcicaps': pcicaps,
-    'cpucount': cpucount,
+    'pcidevices': pci_devices,
+    'pcicaps': pci_caps,
+    'cpucount': cpu_count,
     'irqchips': ioapics,
     'pm_timer_base': pm_timer_base,
     'vtd_interrupt_limit': vtd_interrupt_limit,
@@ -316,6 +326,8 @@ kwargs = {
     'debug_console': debug_console,
 }
 
-f.write(tmpl.render(**kwargs))
+tmpl = Template(filename=os.path.join(options.template_dir,
+                                      'root-cell-config.c.tmpl'))
 
-f.close()
+with open(options.file, 'w') as f:
+    f.write(tmpl.render(**kwargs))
